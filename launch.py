@@ -32,6 +32,7 @@ the brain when settings.json has an `embedder` block; the brain reaches it throu
 import argparse
 import importlib.util
 import json
+import ntpath
 import os
 import re
 import shlex
@@ -154,7 +155,12 @@ def http_json(url, timeout=2):
 
 
 def resolve(path):
-    path = Path(str(path))
+    """A settings.json path from this OpenAmika folder. settings.example.json writes relative paths the Windows way
+    (vendor\\tts-engine\\...); on Linux or macOS they mean the same folders, so the backslashes become slashes."""
+    text = str(path)
+    if os.name != 'nt' and not is_absolute(text):
+        text = text.replace('\\', '/')
+    path = Path(text)
     return path if path.is_absolute() else ROOT / path
 
 
@@ -787,6 +793,12 @@ def autostart_spec(raw):
             'cwd': str(raw.get('cwd') or '') or None, 'env': {str(k): str(v) for k, v in env.items()}}
 
 
+def expand_vars(text):
+    """%VARIABLES% and $VARIABLES expanded on every platform (ntpath knows both forms; posixpath only $VAR), so a
+    config/tools.json written on Windows reads the same way on Linux or macOS."""
+    return ntpath.expandvars(str(text))
+
+
 def is_absolute(path):
     return Path(path).is_absolute() or bool(re.match(r'^[A-Za-z]:[\\/]', path)) or path.startswith(('\\\\', '//'))
 
@@ -795,7 +807,7 @@ def launch_path(value, command=False):
     """An autostart path as it is run: %VARIABLES% expanded (%LOCALAPPDATA%\\hermes\\bin\\hermes.exe), and a relative
     path taken from this OpenAmika folder. A bare command name (`hermes`) is left to the PATH. The brain does the same
     (f_tools.launch_path), so the launcher and the brain start the same program."""
-    text = os.path.expandvars(str(value).strip())
+    text = expand_vars(str(value).strip())
     if command and not ('/' in text or '\\' in text):
         return text
     return text if is_absolute(text) else str(ROOT / text)
@@ -817,7 +829,7 @@ def agent_services(tools):
         env_key, path = AGENT_HEALTH.get(agent_bridge(name, scfg), (None, None))
         base = ((scfg.get('env') or {}).get(env_key) or '').rstrip('/') if env_key else ''
         health = base + path if base and path else None
-        cmd = [launch_path(auto['command'], command=True), *(os.path.expandvars(a) for a in auto['args'])]
+        cmd = [launch_path(auto['command'], command=True), *(expand_vars(a) for a in auto['args'])]
         out.append(Service(name, cmd, cwd=launch_path(auto['cwd']) if auto['cwd'] else ROOT,
                            env=auto['env'], health=health, timeout=90, kind='agent',
                            log=LOGS / f'agent-{name}.log', url=base or None))
